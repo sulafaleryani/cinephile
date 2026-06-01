@@ -1,0 +1,807 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const API_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkMWYyYTdiYzhkNTk1OWU4YjA0MTFjMmRjZjE4ZTU2YyIsIm5iZiI6MTc4MDMzMjgwMC4yMTQwMDAyLCJzdWIiOiI2YTFkYjkwMDI3MDU5MzFjMWZkZDdiMGYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.whrB6ZyUdOIGZUTs4Dk_6e8uFlWzGWur0w9SaHzI_20";
+const BASE = "https://api.themoviedb.org/3";
+const IMG = "https://image.tmdb.org/t/p";
+
+const headers = { Authorization: `Bearer ${API_TOKEN}`, "Content-Type": "application/json" };
+
+const fetcher = (url) => fetch(url, { headers }).then((r) => r.json());
+
+function useLocalStorage(key, init) {
+  const [val, setVal] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(key)) ?? init; } catch { return init; }
+  });
+  const write = useCallback((v) => {
+    setVal(v);
+    localStorage.setItem(key, JSON.stringify(v));
+  }, [key]);
+  return [val, write];
+}
+
+const GENRES_MAP = {
+  28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+  99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+  27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Sci-Fi",
+  10770: "TV Movie", 53: "Thriller", 10752: "War", 37: "Western",
+};
+
+function StarRating({ value, onChange }) {
+  const [hover, setHover] = useState(0);
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <span
+          key={s}
+          onClick={() => onChange(s)}
+          onMouseEnter={() => setHover(s)}
+          onMouseLeave={() => setHover(0)}
+          style={{
+            fontSize: 22,
+            cursor: "pointer",
+            color: s <= (hover || value) ? "#E6B31E" : "#444",
+            transition: "color 0.15s",
+          }}
+        >★</span>
+      ))}
+    </div>
+  );
+}
+
+function ScoreBadge({ score }) {
+  const pct = Math.round(score * 10);
+  const color = pct >= 70 ? "#21D07A" : pct >= 50 ? "#D2D531" : "#DB2360";
+  return (
+    <div style={{
+      width: 46, height: 46, borderRadius: "50%",
+      background: "#081C22", border: `3px solid ${color}`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0,
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "'DM Mono', monospace" }}>
+        {pct}<span style={{ fontSize: 8 }}>%</span>
+      </span>
+    </div>
+  );
+}
+
+function MovieCard({ movie, onClick, isInWatchlist, onWatchlistToggle }) {
+  const [hovered, setHovered] = useState(false);
+  const poster = movie.poster_path ? `${IMG}/w342${movie.poster_path}` : null;
+  const year = movie.release_date?.slice(0, 4);
+
+  return (
+    <div
+      onClick={() => onClick(movie)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "relative", cursor: "pointer", borderRadius: 6, overflow: "hidden",
+        background: "#1a1a2e",
+        transform: hovered ? "scale(1.04) translateY(-4px)" : "scale(1)",
+        transition: "transform 0.25s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.25s",
+        boxShadow: hovered ? "0 20px 60px rgba(0,0,0,0.7)" : "0 4px 16px rgba(0,0,0,0.4)",
+        zIndex: hovered ? 2 : 1,
+      }}
+    >
+      <div style={{ aspectRatio: "2/3", background: "#111" }}>
+        {poster ? (
+          <img src={poster} alt={movie.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+        ) : (
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a2e", padding: 16, textAlign: "center" }}>
+            <span style={{ color: "#666", fontSize: 13 }}>{movie.title}</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 60%, transparent 100%)",
+        padding: "32px 10px 10px",
+        opacity: hovered ? 1 : 0, transition: "opacity 0.2s",
+      }}>
+        <p style={{ color: "#fff", fontSize: 12, fontWeight: 600, margin: "0 0 4px", lineHeight: 1.3 }}>{movie.title}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {year && <span style={{ color: "#aaa", fontSize: 11 }}>{year}</span>}
+          <span style={{ color: "#E6B31E", fontSize: 11 }}>★ {movie.vote_average?.toFixed(1)}</span>
+        </div>
+      </div>
+
+      <button
+        onClick={(e) => { e.stopPropagation(); onWatchlistToggle(movie); }}
+        style={{
+          position: "absolute", top: 8, right: 8,
+          background: isInWatchlist ? "#E6B31E" : "rgba(0,0,0,0.7)",
+          border: "none", borderRadius: "50%", width: 28, height: 28,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", fontSize: 14, transition: "all 0.2s",
+          opacity: hovered ? 1 : 0,
+          color: isInWatchlist ? "#000" : "#fff",
+        }}
+        title={isInWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+      >
+        {isInWatchlist ? "✓" : "+"}
+      </button>
+    </div>
+  );
+}
+
+function HeroSlider({ movies, onMovieClick }) {
+  const [index, setIndex] = useState(0);
+  const [fade, setFade] = useState(true);
+  const timer = useRef(null);
+
+  const go = useCallback((i) => {
+    setFade(false);
+    setTimeout(() => { setIndex(i); setFade(true); }, 300);
+  }, []);
+
+  useEffect(() => {
+    if (!movies.length) return;
+    timer.current = setInterval(() => {
+      setFade(false);
+      setTimeout(() => { setIndex((p) => (p + 1) % Math.min(movies.length, 8)); setFade(true); }, 300);
+    }, 6000);
+    return () => clearInterval(timer.current);
+  }, [movies.length]);
+
+  const movie = movies[index];
+  if (!movie) return null;
+
+  const backdrop = movie.backdrop_path ? `${IMG}/original${movie.backdrop_path}` : null;
+  const year = movie.release_date?.slice(0, 4);
+  const genres = (movie.genre_ids || []).slice(0, 3).map((id) => GENRES_MAP[id]).filter(Boolean);
+
+  return (
+    <div style={{ position: "relative", height: "92vh", minHeight: 520, overflow: "hidden", background: "#060606" }}>
+      {backdrop && (
+        <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0, transition: "opacity 0.4s" }}>
+          <img src={backdrop} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(6,6,6,0.95) 0%, rgba(6,6,6,0.6) 50%, rgba(6,6,6,0.15) 100%)" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(6,6,6,1) 0%, rgba(6,6,6,0) 40%)" }} />
+        </div>
+      )}
+
+      <div style={{
+        position: "absolute", bottom: "12%", left: 0, right: 0, padding: "0 5%",
+        opacity: fade ? 1 : 0, transition: "opacity 0.4s",
+        maxWidth: 620,
+      }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {genres.map((g) => (
+            <span key={g} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#E6B31E", border: "1px solid rgba(230,179,30,0.4)", padding: "3px 10px", borderRadius: 3 }}>{g}</span>
+          ))}
+        </div>
+        <h2 style={{ fontSize: "clamp(28px, 4vw, 52px)", fontWeight: 800, color: "#fff", margin: "0 0 12px", lineHeight: 1.1, fontFamily: "'Playfair Display', serif", textShadow: "0 2px 20px rgba(0,0,0,0.5)" }}>
+          {movie.title}
+        </h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
+          <span style={{ color: "#E6B31E", fontWeight: 700 }}>★ {movie.vote_average?.toFixed(1)}</span>
+          {year && <span style={{ color: "#888" }}>{year}</span>}
+          <ScoreBadge score={movie.vote_average} />
+        </div>
+        <p style={{ color: "#ccc", fontSize: 15, lineHeight: 1.7, margin: "0 0 24px", maxWidth: 520 }}>
+          {movie.overview?.slice(0, 200)}{movie.overview?.length > 200 ? "..." : ""}
+        </p>
+        <button
+          onClick={() => onMovieClick(movie)}
+          style={{
+            background: "#E6B31E", color: "#000", border: "none", borderRadius: 6,
+            padding: "12px 32px", fontSize: 15, fontWeight: 700, cursor: "pointer",
+            letterSpacing: "0.04em", transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#f5c842"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#E6B31E"; }}
+        >
+          View Details
+        </button>
+      </div>
+
+      <div style={{ position: "absolute", bottom: "10%", right: "5%", display: "flex", gap: 8 }}>
+        {movies.slice(0, 8).map((_, i) => (
+          <button
+            key={i} onClick={() => go(i)}
+            style={{
+              width: i === index ? 28 : 8, height: 8, borderRadius: 4, border: "none",
+              background: i === index ? "#E6B31E" : "rgba(255,255,255,0.3)",
+              cursor: "pointer", transition: "all 0.3s", padding: 0,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MovieRow({ title, movies, onMovieClick, watchlist, onWatchlistToggle, accentColor = "#E6B31E" }) {
+  const rowRef = useRef(null);
+  const scroll = (dir) => {
+    rowRef.current?.scrollBy({ left: dir * 280, behavior: "smooth" });
+  };
+
+  return (
+    <div style={{ marginBottom: 48 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 5%", marginBottom: 16 }}>
+        <span style={{ width: 4, height: 24, background: accentColor, borderRadius: 2, flexShrink: 0 }} />
+        <h3 style={{ color: "#fff", fontSize: 20, fontWeight: 700, margin: 0, fontFamily: "'Playfair Display', serif" }}>{title}</h3>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {["‹", "›"].map((arrow, i) => (
+            <button key={arrow} onClick={() => scroll(i === 0 ? -1 : 1)}
+              style={{
+                background: "rgba(255,255,255,0.1)", border: "none", color: "#fff",
+                width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 18,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.25)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+            >{arrow}</button>
+          ))}
+        </div>
+      </div>
+
+      <div ref={rowRef} style={{
+        display: "flex", gap: 12, padding: "8px 5%",
+        overflowX: "auto", scrollbarWidth: "none",
+      }}>
+        {movies.map((m) => (
+          <div key={m.id} style={{ flexShrink: 0, width: 160 }}>
+            <MovieCard
+              movie={m}
+              onClick={onMovieClick}
+              isInWatchlist={watchlist.some((w) => w.id === m.id)}
+              onWatchlistToggle={onWatchlistToggle}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CastCard({ person }) {
+  const photo = person.profile_path ? `${IMG}/w185${person.profile_path}` : null;
+  return (
+    <div style={{ flexShrink: 0, width: 120, textAlign: "center" }}>
+      <div style={{ width: 80, height: 80, borderRadius: "50%", overflow: "hidden", margin: "0 auto 8px", background: "#1a1a2e", border: "2px solid #333" }}>
+        {photo ? (
+          <img src={photo} alt={person.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#555", fontSize: 22 }}>👤</div>
+        )}
+      </div>
+      <p style={{ color: "#fff", fontSize: 12, fontWeight: 600, margin: "0 0 3px" }}>{person.name}</p>
+      <p style={{ color: "#888", fontSize: 11, margin: 0 }}>{person.character}</p>
+    </div>
+  );
+}
+
+function MovieModal({ movieId, onClose, watchlist, onWatchlistToggle, reviews, onAddReview }) {
+  const [movie, setMovie] = useState(null);
+  const [credits, setCredits] = useState(null);
+  const [similar, setSimilar] = useState([]);
+  const [reviewText, setReviewText] = useState("");
+  const [reviewRating, setReviewRating] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("about");
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (!movieId) return;
+    setLoading(true);
+    setTab("about");
+    scrollRef.current?.scrollTo(0, 0);
+    Promise.all([
+      fetcher(`${BASE}/movie/${movieId}?language=en-US`),
+      fetcher(`${BASE}/movie/${movieId}/credits?language=en-US`),
+      fetcher(`${BASE}/movie/${movieId}/similar?language=en-US&page=1`),
+    ]).then(([m, c, s]) => {
+      setMovie(m);
+      setCredits(c);
+      setSimilar(s.results?.slice(0, 12) || []);
+      setLoading(false);
+    });
+  }, [movieId]);
+
+  const handleReview = () => {
+    if (!reviewText.trim() || !reviewRating) return;
+    onAddReview(movieId, { text: reviewText, rating: reviewRating, date: new Date().toLocaleDateString() });
+    setReviewText("");
+    setReviewRating(0);
+  };
+
+  const movieReviews = reviews[movieId] || [];
+  const isWatchlisted = watchlist.some((w) => w.id === movieId);
+
+  if (!movieId) return null;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1000,
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "20px 16px", overflowY: "auto", backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        ref={scrollRef}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#0D0D0D", borderRadius: 12, width: "100%", maxWidth: 900,
+          overflow: "hidden", border: "1px solid #222",
+          boxShadow: "0 40px 120px rgba(0,0,0,0.9)",
+          animation: "slideUp 0.3s cubic-bezier(0.34,1.1,0.64,1)",
+        }}
+      >
+        <style>{`@keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
+
+        {loading ? (
+          <div style={{ height: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 40, height: 40, border: "3px solid #333", borderTopColor: "#E6B31E", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        ) : movie ? (
+          <>
+            <div style={{ position: "relative", height: 340, background: "#060606", overflow: "hidden" }}>
+              {movie.backdrop_path && (
+                <>
+                  <img src={`${IMG}/original${movie.backdrop_path}`} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
+                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(13,13,13,0) 0%, rgba(13,13,13,0.85) 70%, rgba(13,13,13,1) 100%)" }} />
+                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(13,13,13,0.7) 0%, transparent 60%)" }} />
+                </>
+              )}
+              <button
+                onClick={onClose}
+                style={{
+                  position: "absolute", top: 16, right: 16,
+                  background: "rgba(0,0,0,0.7)", border: "1px solid #333",
+                  color: "#fff", borderRadius: "50%", width: 36, height: 36,
+                  cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >✕</button>
+
+              <div style={{ position: "absolute", bottom: 24, left: 24, right: 24 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  {movie.genres?.map((g) => (
+                    <span key={g.id} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#E6B31E", border: "1px solid rgba(230,179,30,0.4)", padding: "3px 10px", borderRadius: 3 }}>{g.name}</span>
+                  ))}
+                </div>
+                <h2 style={{ color: "#fff", fontSize: 32, fontWeight: 800, margin: "0 0 12px", fontFamily: "'Playfair Display', serif", lineHeight: 1.1 }}>{movie.title}</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                  <ScoreBadge score={movie.vote_average} />
+                  <div>
+                    <p style={{ color: "#888", fontSize: 11, margin: "0 0 2px" }}>User Score</p>
+                    <p style={{ color: "#E6B31E", fontWeight: 700, margin: 0 }}>★ {movie.vote_average?.toFixed(1)} / 10</p>
+                  </div>
+                  {movie.release_date && <span style={{ color: "#888", fontSize: 14 }}>{movie.release_date?.slice(0, 4)}</span>}
+                  {movie.runtime && <span style={{ color: "#888", fontSize: 14 }}>{Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m</span>}
+                  {movie.vote_count && <span style={{ color: "#666", fontSize: 13 }}>{movie.vote_count?.toLocaleString()} votes</span>}
+                  <button
+                    onClick={() => onWatchlistToggle(movie)}
+                    style={{
+                      background: isWatchlisted ? "#E6B31E" : "transparent",
+                      border: `1px solid ${isWatchlisted ? "#E6B31E" : "#555"}`,
+                      color: isWatchlisted ? "#000" : "#fff",
+                      borderRadius: 6, padding: "8px 20px", cursor: "pointer",
+                      fontWeight: 600, fontSize: 13, transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => { if (!isWatchlisted) { e.currentTarget.style.borderColor = "#E6B31E"; e.currentTarget.style.color = "#E6B31E"; } }}
+                    onMouseLeave={(e) => { if (!isWatchlisted) { e.currentTarget.style.borderColor = "#555"; e.currentTarget.style.color = "#fff"; } }}
+                  >
+                    {isWatchlisted ? "✓ Watchlisted" : "+ Watchlist"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", borderBottom: "1px solid #222", padding: "0 24px" }}>
+              {["about", "cast", "reviews", "similar"].map((t) => (
+                <button
+                  key={t} onClick={() => setTab(t)}
+                  style={{
+                    background: "none", border: "none", color: tab === t ? "#E6B31E" : "#666",
+                    borderBottom: tab === t ? "2px solid #E6B31E" : "2px solid transparent",
+                    padding: "14px 20px", cursor: "pointer", fontWeight: 600, fontSize: 14,
+                    textTransform: "capitalize", transition: "color 0.2s", letterSpacing: "0.03em",
+                  }}
+                >{t}</button>
+              ))}
+            </div>
+
+            <div style={{ padding: "28px 24px", minHeight: 280 }}>
+              {tab === "about" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
+                  <div>
+                    <p style={{ color: "#ccc", fontSize: 15, lineHeight: 1.8, margin: "0 0 24px" }}>{movie.overview || "No overview available."}</p>
+                    {movie.tagline && (
+                      <p style={{ color: "#E6B31E", fontStyle: "italic", borderLeft: "3px solid #E6B31E", paddingLeft: 16, margin: "0 0 24px" }}>"{movie.tagline}"</p>
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      {[
+                        ["Status", movie.status],
+                        ["Language", movie.original_language?.toUpperCase()],
+                        ["Budget", movie.budget ? `$${(movie.budget / 1e6).toFixed(0)}M` : "N/A"],
+                        ["Revenue", movie.revenue ? `$${(movie.revenue / 1e6).toFixed(0)}M` : "N/A"],
+                      ].map(([label, value]) => value && (
+                        <div key={label} style={{ background: "#161616", borderRadius: 8, padding: "14px 16px", border: "1px solid #222" }}>
+                          <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</p>
+                          <p style={{ color: "#fff", fontWeight: 600, margin: 0, fontSize: 15 }}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {movie.production_companies?.length > 0 && (
+                      <div style={{ marginTop: 20 }}>
+                        <p style={{ color: "#666", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>Production</p>
+                        {movie.production_companies.slice(0, 3).map((c) => (
+                          <span key={c.id} style={{ display: "inline-block", fontSize: 13, color: "#aaa", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 4, padding: "3px 10px", marginRight: 6, marginBottom: 6 }}>{c.name}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {tab === "cast" && (
+                <div>
+                  <div style={{ display: "flex", gap: 24, overflowX: "auto", padding: "8px 0", scrollbarWidth: "none" }}>
+                    {credits?.cast?.slice(0, 20).map((p) => <CastCard key={p.id} person={p} />)}
+                  </div>
+                  {credits?.crew?.filter((c) => ["Director", "Producer", "Screenplay"].includes(c.job)).length > 0 && (
+                    <div style={{ marginTop: 32, borderTop: "1px solid #222", paddingTop: 24 }}>
+                      <p style={{ color: "#666", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 16px" }}>Crew Highlights</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                        {credits.crew.filter((c) => ["Director", "Producer", "Screenplay"].includes(c.job)).slice(0, 8).map((p) => (
+                          <div key={`${p.id}-${p.job}`} style={{ background: "#161616", border: "1px solid #222", borderRadius: 8, padding: "10px 14px" }}>
+                            <p style={{ color: "#fff", fontWeight: 600, fontSize: 13, margin: "0 0 3px" }}>{p.name}</p>
+                            <p style={{ color: "#E6B31E", fontSize: 11, margin: 0 }}>{p.job}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tab === "reviews" && (
+                <div>
+                  <div style={{ background: "#161616", borderRadius: 10, padding: "20px", border: "1px solid #222", marginBottom: 28 }}>
+                    <p style={{ color: "#aaa", fontSize: 13, margin: "0 0 12px" }}>Write your review</p>
+                    <StarRating value={reviewRating} onChange={setReviewRating} />
+                    <textarea
+                      value={reviewText}
+                      onChange={(e) => setReviewText(e.target.value)}
+                      placeholder="Share your thoughts..."
+                      style={{
+                        width: "100%", marginTop: 14, background: "#0a0a0a", border: "1px solid #333",
+                        borderRadius: 8, color: "#fff", fontSize: 14, padding: "12px 14px",
+                        resize: "vertical", minHeight: 90, outline: "none", fontFamily: "inherit",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <button
+                      onClick={handleReview}
+                      style={{
+                        marginTop: 12, background: "#E6B31E", border: "none", color: "#000",
+                        padding: "10px 24px", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13,
+                      }}
+                    >Post Review</button>
+                  </div>
+                  {movieReviews.length === 0 ? (
+                    <p style={{ color: "#555", textAlign: "center", padding: 32 }}>No reviews yet. Be the first.</p>
+                  ) : movieReviews.map((r, i) => (
+                    <div key={i} style={{ background: "#161616", borderRadius: 10, padding: 20, border: "1px solid #222", marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#2a2a2a", display: "flex", alignItems: "center", justifyContent: "center", color: "#E6B31E", fontWeight: 700 }}>
+                          U{i + 1}
+                        </div>
+                        <div>
+                          <p style={{ color: "#E6B31E", fontSize: 13, margin: 0 }}>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</p>
+                          <p style={{ color: "#555", fontSize: 11, margin: 0 }}>{r.date}</p>
+                        </div>
+                      </div>
+                      <p style={{ color: "#ccc", fontSize: 14, lineHeight: 1.7, margin: 0 }}>{r.text}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {tab === "similar" && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 12 }}>
+                  {similar.length === 0 ? (
+                    <p style={{ color: "#555", gridColumn: "1/-1", textAlign: "center", padding: 32 }}>No similar movies found.</p>
+                  ) : similar.map((m) => (
+                    <MovieCard key={m.id} movie={m} onClick={() => {}} isInWatchlist={watchlist.some((w) => w.id === m.id)} onWatchlistToggle={onWatchlistToggle} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SearchOverlay({ onClose, onMovieClick, watchlist, onWatchlistToggle }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const debounce = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    if (!query.trim()) { setResults([]); return; }
+    setLoading(true);
+    debounce.current = setTimeout(() => {
+      fetcher(`${BASE}/search/movie?query=${encodeURIComponent(query)}&language=en-US&page=1`)
+        .then((d) => { setResults(d.results?.slice(0, 20) || []); setLoading(false); });
+    }, 400);
+  }, [query]);
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", zIndex: 2000, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ maxWidth: 800, margin: "0 auto", padding: "60px 20px 40px" }}>
+        <div style={{ position: "relative", marginBottom: 40 }}>
+          <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", fontSize: 22, color: "#666" }}>🔍</span>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search movies..."
+            style={{
+              width: "100%", background: "#161616", border: "1px solid #333",
+              color: "#fff", fontSize: 20, padding: "16px 20px 16px 52px",
+              borderRadius: 10, outline: "none", boxSizing: "border-box",
+              fontFamily: "inherit",
+            }}
+          />
+          <button onClick={onClose} style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#666", fontSize: 22, cursor: "pointer" }}>✕</button>
+        </div>
+        {loading && <p style={{ color: "#666", textAlign: "center" }}>Searching...</p>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 14 }}>
+          {results.map((m) => (
+            <MovieCard key={m.id} movie={m} onClick={(mv) => { onMovieClick(mv); onClose(); }} isInWatchlist={watchlist.some((w) => w.id === m.id)} onWatchlistToggle={onWatchlistToggle} />
+          ))}
+        </div>
+        {!loading && query && results.length === 0 && (
+          <p style={{ color: "#555", textAlign: "center", padding: 40, fontSize: 16 }}>No results for "{query}"</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WatchlistPanel({ watchlist, onClose, onMovieClick, onRemove }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1500, display: "flex", justifyContent: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: "min(420px, 100%)", background: "#0d0d0d", height: "100%",
+        borderLeft: "1px solid #222", overflowY: "auto", padding: "28px 24px",
+        boxShadow: "-20px 0 60px rgba(0,0,0,0.8)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+          <h3 style={{ color: "#fff", fontFamily: "'Playfair Display', serif", fontSize: 22, margin: 0 }}>My Watchlist</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#666", fontSize: 22, cursor: "pointer" }}>✕</button>
+        </div>
+        {watchlist.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <p style={{ fontSize: 40, marginBottom: 12 }}>🎬</p>
+            <p style={{ color: "#555", fontSize: 15 }}>Your watchlist is empty.</p>
+            <p style={{ color: "#444", fontSize: 13 }}>Click + on any movie to add it.</p>
+          </div>
+        ) : watchlist.map((m) => {
+          const poster = m.poster_path ? `${IMG}/w92${m.poster_path}` : null;
+          return (
+            <div key={m.id} style={{ display: "flex", gap: 14, marginBottom: 16, cursor: "pointer" }} onClick={() => { onMovieClick(m); onClose(); }}>
+              <div style={{ width: 54, height: 80, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "#1a1a2e" }}>
+                {poster ? <img src={poster} alt={m.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "#222" }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ color: "#fff", fontWeight: 600, margin: "0 0 4px", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</p>
+                <p style={{ color: "#E6B31E", fontSize: 12, margin: "0 0 4px" }}>★ {m.vote_average?.toFixed(1)}</p>
+                <p style={{ color: "#666", fontSize: 12, margin: 0 }}>{m.release_date?.slice(0, 4)}</p>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); onRemove(m); }}
+                style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 18, padding: "0 4px", alignSelf: "flex-start" }}
+                title="Remove"
+              >✕</button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [trending, setTrending] = useState([]);
+  const [popular, setPopular] = useState([]);
+  const [topRated, setTopRated] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
+  const [nowPlaying, setNowPlaying] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [watchlist, setWatchlist] = useLocalStorage("filmvault_watchlist", []);
+  const [reviews, setReviews] = useLocalStorage("filmvault_reviews", {});
+  const [activeGenre, setActiveGenre] = useState(null);
+  const [genreMovies, setGenreMovies] = useState([]);
+  const [loadingGenre, setLoadingGenre] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 60);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    Promise.all([
+      fetcher(`${BASE}/trending/movie/week?language=en-US`),
+      fetcher(`${BASE}/movie/popular?language=en-US&page=1`),
+      fetcher(`${BASE}/movie/top_rated?language=en-US&page=1`),
+      fetcher(`${BASE}/movie/upcoming?language=en-US&page=1`),
+      fetcher(`${BASE}/movie/now_playing?language=en-US&page=1`),
+    ]).then(([tr, po, tp, up, np]) => {
+      setTrending(tr.results || []);
+      setPopular(po.results || []);
+      setTopRated(tp.results || []);
+      setUpcoming(up.results || []);
+      setNowPlaying(np.results || []);
+    });
+  }, []);
+
+  const toggleWatchlist = useCallback((movie) => {
+    setWatchlist((prev) => {
+      const exists = prev.some((w) => w.id === movie.id);
+      return exists ? prev.filter((w) => w.id !== movie.id) : [...prev, movie];
+    });
+  }, [setWatchlist]);
+
+  const addReview = useCallback((movieId, review) => {
+    setReviews((prev) => ({ ...prev, [movieId]: [...(prev[movieId] || []), review] }));
+  }, [setReviews]);
+
+  const handleGenre = (id) => {
+    if (activeGenre === id) { setActiveGenre(null); setGenreMovies([]); return; }
+    setActiveGenre(id);
+    setLoadingGenre(true);
+    fetcher(`${BASE}/discover/movie?with_genres=${id}&language=en-US&sort_by=popularity.desc`)
+      .then((d) => { setGenreMovies(d.results || []); setLoadingGenre(false); });
+  };
+
+  const featuredGenres = [28, 27, 878, 35, 18, 53, 10749, 16];
+
+  return (
+    <div style={{ background: "#060606", minHeight: "100vh", fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", color: "#fff" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap');
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { display: none; }
+        html { scroll-behavior: smooth; }
+      `}</style>
+
+      <nav style={{
+        position: "fixed", top: 0, left: 0, right: 0, zIndex: 900,
+        background: scrolled ? "rgba(6,6,6,0.97)" : "linear-gradient(to bottom, rgba(6,6,6,0.8), transparent)",
+        backdropFilter: scrolled ? "blur(12px)" : "none",
+        borderBottom: scrolled ? "1px solid rgba(255,255,255,0.07)" : "none",
+        transition: "all 0.3s",
+        padding: "0 5%",
+        height: 64,
+        display: "flex", alignItems: "center", gap: 32,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 16 }}>
+          <span style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Playfair Display', serif", color: "#E6B31E", letterSpacing: "-0.02em" }}>FILM</span>
+          <span style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Playfair Display', serif", color: "#fff", letterSpacing: "-0.02em" }}>VAULT</span>
+        </div>
+
+        <div style={{ display: "flex", gap: 4, flex: 1 }}>
+          {[["Home", "#"], ["Movies", "#"]].map(([label]) => (
+            <a key={label} href="#" style={{ color: "#ccc", textDecoration: "none", padding: "8px 12px", borderRadius: 6, fontSize: 14, fontWeight: 500, transition: "color 0.2s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#ccc"; }}
+            >{label}</a>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => setSearchOpen(true)}
+            style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", padding: "8px 10px", borderRadius: 8, fontSize: 18, transition: "color 0.2s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#aaa"; }}
+          >🔍</button>
+          <button
+            onClick={() => setWatchlistOpen(true)}
+            style={{
+              background: "transparent", border: "1px solid #333", color: "#fff", borderRadius: 8,
+              padding: "7px 16px", cursor: "pointer", fontWeight: 600, fontSize: 13,
+              display: "flex", alignItems: "center", gap: 8, transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#E6B31E"; e.currentTarget.style.color = "#E6B31E"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#fff"; }}
+          >
+            Watchlist
+            {watchlist.length > 0 && (
+              <span style={{ background: "#E6B31E", color: "#000", borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{watchlist.length}</span>
+            )}
+          </button>
+        </div>
+      </nav>
+
+      <HeroSlider movies={trending} onMovieClick={(m) => setSelectedId(m.id)} />
+
+      <div style={{ padding: "48px 5% 20px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {featuredGenres.map((id) => (
+            <button
+              key={id}
+              onClick={() => handleGenre(id)}
+              style={{
+                background: activeGenre === id ? "#E6B31E" : "transparent",
+                border: `1px solid ${activeGenre === id ? "#E6B31E" : "#333"}`,
+                color: activeGenre === id ? "#000" : "#aaa",
+                borderRadius: 20, padding: "6px 16px", cursor: "pointer",
+                fontSize: 13, fontWeight: 600, transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => { if (activeGenre !== id) { e.currentTarget.style.borderColor = "#E6B31E"; e.currentTarget.style.color = "#E6B31E"; } }}
+              onMouseLeave={(e) => { if (activeGenre !== id) { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#aaa"; } }}
+            >{GENRES_MAP[id]}</button>
+          ))}
+        </div>
+      </div>
+
+      {activeGenre && (
+        <div style={{ marginBottom: 40 }}>
+          {loadingGenre ? (
+            <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: 32, height: 32, border: "3px solid #333", borderTopColor: "#E6B31E", borderRadius: "50%", animation: "spin2 0.8s linear infinite" }} />
+              <style>{`@keyframes spin2 { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          ) : (
+            <MovieRow title={`${GENRES_MAP[activeGenre]} Films`} movies={genreMovies} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#9B59B6" />
+          )}
+        </div>
+      )}
+
+      <MovieRow title="Now Playing" movies={nowPlaying} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#21D07A" />
+      <MovieRow title="Trending This Week" movies={trending} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#E6B31E" />
+      <MovieRow title="Popular Right Now" movies={popular} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#E74C3C" />
+      <MovieRow title="All-Time Greatest" movies={topRated} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#3498DB" />
+      <MovieRow title="Coming Soon" movies={upcoming} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} accentColor="#9B59B6" />
+
+      <footer style={{ borderTop: "1px solid #1a1a1a", padding: "40px 5%", marginTop: 40, textAlign: "center" }}>
+        <p style={{ color: "#333", fontSize: 13 }}>
+          Data provided by{" "}
+          <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" style={{ color: "#E6B31E", textDecoration: "none" }}>The Movie Database (TMDB)</a>.
+          This product uses the TMDB API but is not endorsed or certified by TMDB.
+        </p>
+      </footer>
+
+      {selectedId && (
+        <MovieModal
+          movieId={selectedId}
+          onClose={() => setSelectedId(null)}
+          watchlist={watchlist}
+          onWatchlistToggle={toggleWatchlist}
+          reviews={reviews}
+          onAddReview={addReview}
+        />
+      )}
+      {searchOpen && (
+        <SearchOverlay onClose={() => setSearchOpen(false)} onMovieClick={(m) => setSelectedId(m.id)} watchlist={watchlist} onWatchlistToggle={toggleWatchlist} />
+      )}
+      {watchlistOpen && (
+        <WatchlistPanel watchlist={watchlist} onClose={() => setWatchlistOpen(false)} onMovieClick={(m) => setSelectedId(m.id)} onRemove={toggleWatchlist} />
+      )}
+    </div>
+  );
+}
